@@ -20,7 +20,8 @@ set(SRCS src/)
 include_directories(${HDRS})
 # Populate a CMake variable with the sources
 set(SRCS
-            ${SRCS}/server.cpp
+        ${SRCS}/selectserver.c
+        #${SRCS}/server.cpp
 	    #${HDRS}/scaper.h)
 	    )
 #add  Qt .ui form data
