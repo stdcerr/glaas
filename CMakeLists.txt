@@ -20,7 +20,7 @@ set(SRCS src/)
 include_directories(${HDRS})
 # Populate a CMake variable with the sources
 set(SRCS
-        ${SRCS}/selectserver.c
+        ${SRCS}/main.c
         #${SRCS}/server.cpp
 	    #${HDRS}/scaper.h)
 	    )
