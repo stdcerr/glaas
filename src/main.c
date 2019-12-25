@@ -1,188 +1,138 @@
-/*
-AUTHOR: Abhijeet Rastogi (http://www.google.com/profiles/abhijeet.1989)
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+#include <netdb.h>
+#include <limits.h>
 
-This is a very simple HTTP server. Default port is 10000 and ROOT for the server is your current working directory..
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 
-You can provide command line arguments like:- $./a.aout -p [port] -r [path]
+#define OK          0
+#define ERROR       -1
+#define DFLT_PRT    8080
+#define SIZE        1024
+#define BACKLOG     10
+#define BUFSIZE        SIZE
 
-for ex. 
-$./a.out -p 50000 -r /home/
-to start a server at port 50000 with root directory as "/home"
 
-$./a.out -r /home/shadyabhi
-starts the server at port 10000 with ROOT as /home/shadyabhi
+void report(struct sockaddr_in *serverAddress);
 
-*/
 
-#include<stdio.h>
-#include<string.h>
-#include<stdlib.h>
-#include<unistd.h>
-#include<sys/types.h>
-#include<sys/stat.h>
-#include<sys/socket.h>
-#include<arpa/inet.h>
-#include<netdb.h>
-#include<signal.h>
-#include<fcntl.h>
-
-#define CONNMAX 1000
-#define BYTES 1024
-
-char *ROOT;
-int listenfd, clients[CONNMAX];
-void error(char *);
-void startServer(char *);
-void respond(int);
-
-int main(int argc, char* argv[])
+//------------------------------------------------------------------
+void setHttpHeader(char httpHeader[])
 {
-	struct sockaddr_in clientaddr;
-	socklen_t addrlen;
-	char c;    
-	
-	//Default Values PATH = ~/ and PORT=10000
-	char PORT[6];
-	ROOT = getenv("PWD");
-	strcpy(PORT,"10000");
+    // File object to return
+    FILE *htmlData = fopen("index.html", "r");
+    if (htmlData == NULL){
+        perror("failed to open index.html");
+        exit (EXIT_FAILURE);
+    }
 
-	int slot=0;
-
-	//Parsing the command line arguments
-	while ((c = getopt (argc, argv, "p:r:")) != -1)
-		switch (c)
-		{
-			case 'r':
-				ROOT = malloc(strlen(optarg));
-				strcpy(ROOT,optarg);
-				break;
-			case 'p':
-				strcpy(PORT,optarg);
-				break;
-			case '?':
-				fprintf(stderr,"Wrong arguments given!!!\n");
-				exit(1);
-			default:
-				exit(1);
-		}
-	
-	printf("Server started at port no. %s%s%s with root directory as %s%s%s\n","\033[92m",PORT,"\033[0m","\033[92m",ROOT,"\033[0m");
-	// Setting all elements to -1: signifies there is no client connected
-	int i;
-	for (i=0; i<CONNMAX; i++)
-		clients[i]=-1;
-	startServer(PORT);
-
-	// ACCEPT connections
-	while (1)
-	{
-		addrlen = sizeof(clientaddr);
-		clients[slot] = accept (listenfd, (struct sockaddr *) &clientaddr, &addrlen);
-
-		if (clients[slot]<0)
-			error ("accept() error");
-		else
-		{
-			if ( fork()==0 )
-			{
-				respond(slot);
-				exit(0);
-			}
-		}
-
-		while (clients[slot]!=-1) slot = (slot+1)%CONNMAX;
-	}
-
-	return 0;
+    char line[100];
+    char responseData[8000];
+    while (fgets(line, 100, htmlData) != 0) {
+        strcat(responseData, line);
+    }
+    strcat(httpHeader, responseData);
 }
+//------------------------------------------------------------------
 
-//start server
-void startServer(char *port)
+int main (int argc, char *argv[]) {
+    int clientSocket;
+    uint32_t port;
+    char httpHeader[8000] = "HTTP/1.1 200 OK\r\n\n";
+    char buf[BUFSIZE]; /* message buffer */
+    fd_set readfds;
+
+    port = (argc>1)?strtol(argv[1],NULL,10):DFLT_PRT;
+    if (port == LONG_MIN ||
+        port == LONG_MAX)
+        port = DFLT_PRT;
+    if (errno)
+        exit(EXIT_FAILURE);
+
+    printf("listening port set to %u\n",port);
+
+    //serverSocket setup
+    int serverSocket = socket (
+            AF_INET,
+            SOCK_STREAM,
+            0
+        );
+
+    //local address structure
+    struct sockaddr_in srv_addr;
+    srv_addr.sin_family = AF_INET;
+    srv_addr.sin_port= htonl(port);
+    srv_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK/*ANY*/);
+
+    if (bind (
+         serverSocket,
+         (struct sockaddr*)&srv_addr,
+        sizeof(srv_addr)
+    )!=0) {
+        perror("bind operation failed");
+        exit (EXIT_FAILURE);
+    }
+
+    int listening = listen(serverSocket, BACKLOG);
+    if (listening <0) {
+        printf("Error: The server is not listenig.\n");
+        return listening;
+    }
+    report(&srv_addr);
+    FD_ZERO(&readfds);          /* initialize the fd set */
+    FD_SET(serverSocket, &readfds); /* add socket fd */
+    FD_SET(0, &readfds);        /* add stdin fd (0) */
+    if (select(serverSocket+1, &readfds, 0, 0, 0) < 0) {
+      perror("ERROR in select");
+      exit (EXIT_FAILURE);
+    }
+    printf("recv conn req!\n");
+
+    /* if the user has entered a command, process it */
+    if (FD_ISSET(0, &readfds)) {
+      fgets(buf, BUFSIZE, stdin);
+      switch (buf[0]) {
+          default:
+              printf("buf[0]: 0x%c\n",buf[0]);
+      }
+    setHttpHeader(httpHeader);
+    int clientSocket;
+    }
+
+    while(1) {
+    clientSocket = accept(serverSocket, NULL, NULL);
+    send(clientSocket, httpHeader, sizeof(httpHeader),0);
+    close(clientSocket);
+    }
+
+return OK;
+
+}
+//------------------------------------------------------------------
+
+void report(struct sockaddr_in *serverAddress)
 {
-	struct addrinfo hints, *res, *p;
-
-	// getaddrinfo for host
-	memset (&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_STREAM;
-	hints.ai_flags = AI_PASSIVE;
-	if (getaddrinfo( NULL, port, &hints, &res) != 0)
-	{
-		perror ("getaddrinfo() error");
-		exit(1);
-	}
-	// socket and bind
-	for (p = res; p!=NULL; p=p->ai_next)
-	{
-		listenfd = socket (p->ai_family, p->ai_socktype, 0);
-		if (listenfd == -1) continue;
-		if (bind(listenfd, p->ai_addr, p->ai_addrlen) == 0) break;
-	}
-	if (p==NULL)
-	{
-		perror ("socket() or bind()");
-		exit(1);
-	}
-
-	freeaddrinfo(res);
-
-	// listen for incoming connections
-	if ( listen (listenfd, 1000000) != 0 )
-	{
-		perror("listen() error");
-		exit(1);
-	}
+    char hostBuffer[INET6_ADDRSTRLEN];
+    char serviceBuffer[NI_MAXSERV]; // defined in `<netdb.h>`
+    socklen_t addr_len = sizeof(*serverAddress);
+    int err = getnameinfo(
+        (struct sockaddr *) serverAddress,
+        addr_len,
+        hostBuffer,
+        sizeof(hostBuffer),
+        serviceBuffer,
+        sizeof(serviceBuffer),
+        NI_NUMERICHOST|NI_NUMERICSERV
+    );
+    if (err != 0) {
+        printf("It's not working!!\n");
+        exit (EXIT_FAILURE);
+    }
+    printf("\n\n\tServer listening on http://%s:%s\n", hostBuffer, serviceBuffer);
 }
-
-//client connection
-void respond(int n)
-{
-	char mesg[99999], *reqline[3], data_to_send[BYTES], path[99999];
-	int rcvd, fd, bytes_read;
-
-	memset( (void*)mesg, (int)'\0', 99999 );
-
-	rcvd=recv(clients[n], mesg, 99999, 0);
-
-	if (rcvd<0)    // receive error
-		fprintf(stderr,("recv() error\n"));
-	else if (rcvd==0)    // receive socket closed
-		fprintf(stderr,"Client disconnected upexpectedly.\n");
-	else    // message received
-	{
-		printf("%s", mesg);
-		reqline[0] = strtok (mesg, " \t\n");
-		if ( strncmp(reqline[0], "GET\0", 4)==0 )
-		{
-			reqline[1] = strtok (NULL, " \t");
-			reqline[2] = strtok (NULL, " \t\n");
-			if ( strncmp( reqline[2], "HTTP/1.0", 8)!=0 && strncmp( reqline[2], "HTTP/1.1", 8)!=0 )
-			{
-				write(clients[n], "HTTP/1.0 400 Bad Request\n", 25);
-			}
-			else
-			{
-				if ( strncmp(reqline[1], "/\0", 2)==0 )
-					reqline[1] = "/index.html";        //Because if no file is specified, index.html will be opened by default (like it happens in APACHE...
-
-				strcpy(path, ROOT);
-				strcpy(&path[strlen(ROOT)], reqline[1]);
-				printf("file: %s\n", path);
-
-				if ( (fd=open(path, O_RDONLY))!=-1 )    //FILE FOUND
-				{
-					send(clients[n], "HTTP/1.0 200 OK\n\n", 17, 0);
-					while ( (bytes_read=read(fd, data_to_send, BYTES))>0 )
-						write (clients[n], data_to_send, bytes_read);
-				}
-				else    write(clients[n], "HTTP/1.0 404 Not Found\n", 23); //FILE NOT FOUND
-			}
-		}
-	}
-
-	//Closing SOCKET
-	shutdown (clients[n], SHUT_RDWR);         //All further send and recieve operations are DISABLED...
-	close(clients[n]);
-	clients[n]=-1;
-}
-
+//------------------------------------------------------------------
