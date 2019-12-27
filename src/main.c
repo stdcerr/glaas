@@ -1,138 +1,96 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <errno.h>
+#include <stdio.h> 
+#include <netdb.h> 
+#include <netinet/in.h> 
+#include <stdlib.h> 
+#include <string.h> 
 #include <unistd.h>
-#include <netdb.h>
-#include <limits.h>
+#include <arpa/inet.h>
+#include <sys/socket.h> 
+#include <sys/types.h> 
+#define MAX 80 
+#define PORT 1804 
+#define SA struct sockaddr 
 
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
+// Function designed for chat between client and server. 
+void func(int sockfd) 
+{ 
+	char buff[MAX]; 
+	int n; 
+	// infinite loop for chat 
+	for (;;) { 
+		bzero(buff, MAX); 
 
-#define OK          0
-#define ERROR       -1
-#define DFLT_PRT    8080
-#define SIZE        1024
-#define BACKLOG     10
-#define BUFSIZE        SIZE
+		// read the message from client and copy it in buffer 
+		read(sockfd, buff, sizeof(buff)); 
+		// print buffer which contains the client contents 
+		printf("From client: %s\t To client : ", buff); 
+		bzero(buff, MAX); 
+		n = 0; 
+		// copy server message in the buffer 
+		while ((buff[n++] = getchar()) != '\n') 
+			; 
 
+		// and send that buffer to client 
+		write(sockfd, buff, sizeof(buff)); 
 
-void report(struct sockaddr_in *serverAddress);
+		// if msg contains "Exit" then server exit and chat ended. 
+		if (strncmp("exit", buff, 4) == 0) { 
+			printf("Server Exit...\n"); 
+			break; 
+		} 
+	} 
+} 
 
+// Driver function 
+int main() 
+{ 
+	int sockfd, connfd, len; 
+	struct sockaddr_in servaddr, cli; 
 
-//------------------------------------------------------------------
-void setHttpHeader(char httpHeader[])
-{
-    // File object to return
-    FILE *htmlData = fopen("index.html", "r");
-    if (htmlData == NULL){
-        perror("failed to open index.html");
-        exit (EXIT_FAILURE);
-    }
+	// socket create and verification 
+	sockfd = socket(AF_INET, SOCK_STREAM, 0); 
+	if (sockfd == -1) { 
+		printf("socket creation failed...\n"); 
+		exit(0); 
+	} 
+	else
+		printf("Socket successfully created..\n"); 
+	bzero(&servaddr, sizeof(servaddr)); 
 
-    char line[100];
-    char responseData[8000];
-    while (fgets(line, 100, htmlData) != 0) {
-        strcat(responseData, line);
-    }
-    strcat(httpHeader, responseData);
-}
-//------------------------------------------------------------------
+	// assign IP, PORT 
+	servaddr.sin_family = AF_INET; 
+	servaddr.sin_addr.s_addr = htonl(INADDR_ANY); 
+	servaddr.sin_port = htons(PORT); 
 
-int main (int argc, char *argv[]) {
-    int clientSocket;
-    uint32_t port;
-    char httpHeader[8000] = "HTTP/1.1 200 OK\r\n\n";
-    char buf[BUFSIZE]; /* message buffer */
-    fd_set readfds;
+	// Binding newly created socket to given IP and verification 
+	if ((bind(sockfd, (SA*)&servaddr, sizeof(servaddr))) != 0) { 
+		printf("socket bind failed...\n"); 
+		exit(0); 
+	} 
+	else
+		printf("Socket successfully binded..\n"); 
 
-    port = (argc>1)?strtol(argv[1],NULL,10):DFLT_PRT;
-    if (port == LONG_MIN ||
-        port == LONG_MAX)
-        port = DFLT_PRT;
-    if (errno)
-        exit(EXIT_FAILURE);
+	// Now server is ready to listen and verification 
+	if ((listen(sockfd, 5)) != 0) { 
+		printf("Listen failed...\n"); 
+		exit(0); 
+	} 
+	else
+		printf("Server listening..\n"); 
+	len = sizeof(cli); 
 
-    printf("listening port set to %u\n",port);
+	// Accept the data packet from client and verification 
+	connfd = accept(sockfd, (SA*)&cli, &len); 
+	if (connfd < 0) { 
+		printf("server acccept failed...\n"); 
+		exit(0); 
+	} 
+	else
+		printf("server acccept the client...\n"); 
 
-    //serverSocket setup
-    int serverSocket = socket (
-            AF_INET,
-            SOCK_STREAM,
-            0
-        );
+	// Function for chatting between client and server 
+	func(connfd); 
 
-    //local address structure
-    struct sockaddr_in srv_addr;
-    srv_addr.sin_family = AF_INET;
-    srv_addr.sin_port= htonl(port);
-    srv_addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK/*ANY*/);
-
-    if (bind (
-         serverSocket,
-         (struct sockaddr*)&srv_addr,
-        sizeof(srv_addr)
-    )!=0) {
-        perror("bind operation failed");
-        exit (EXIT_FAILURE);
-    }
-
-    int listening = listen(serverSocket, BACKLOG);
-    if (listening <0) {
-        printf("Error: The server is not listenig.\n");
-        return listening;
-    }
-    report(&srv_addr);
-    FD_ZERO(&readfds);          /* initialize the fd set */
-    FD_SET(serverSocket, &readfds); /* add socket fd */
-    FD_SET(0, &readfds);        /* add stdin fd (0) */
-    if (select(serverSocket+1, &readfds, 0, 0, 0) < 0) {
-      perror("ERROR in select");
-      exit (EXIT_FAILURE);
-    }
-    printf("recv conn req!\n");
-
-    /* if the user has entered a command, process it */
-    if (FD_ISSET(0, &readfds)) {
-      fgets(buf, BUFSIZE, stdin);
-      switch (buf[0]) {
-          default:
-              printf("buf[0]: 0x%c\n",buf[0]);
-      }
-    setHttpHeader(httpHeader);
-    int clientSocket;
-    }
-
-    while(1) {
-    clientSocket = accept(serverSocket, NULL, NULL);
-    send(clientSocket, httpHeader, sizeof(httpHeader),0);
-    close(clientSocket);
-    }
-
-return OK;
-
-}
-//------------------------------------------------------------------
-
-void report(struct sockaddr_in *serverAddress)
-{
-    char hostBuffer[INET6_ADDRSTRLEN];
-    char serviceBuffer[NI_MAXSERV]; // defined in `<netdb.h>`
-    socklen_t addr_len = sizeof(*serverAddress);
-    int err = getnameinfo(
-        (struct sockaddr *) serverAddress,
-        addr_len,
-        hostBuffer,
-        sizeof(hostBuffer),
-        serviceBuffer,
-        sizeof(serviceBuffer),
-        NI_NUMERICHOST|NI_NUMERICSERV
-    );
-    if (err != 0) {
-        printf("It's not working!!\n");
-        exit (EXIT_FAILURE);
-    }
-    printf("\n\n\tServer listening on http://%s:%s\n", hostBuffer, serviceBuffer);
-}
-//------------------------------------------------------------------
+	// After chatting close the socket 
+	close(sockfd); 
+} 
